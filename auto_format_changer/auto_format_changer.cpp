@@ -1,105 +1,46 @@
-﻿#include <Windows.h>
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <algorithm>
+﻿#include <iostream>
 #include <filesystem>
+#include <string>
+#include <cstdlib>
 
-using namespace std;
+namespace fs = std::filesystem;
 
-#define BUF_SIZE 1024
+int main(int argc, char* argv[]) {
+    // 设置默认目录为当前目录
+    std::string directory = ".";
 
-// FFmpeg 转换命令
-string getFFmpegCommand(const string& inputPath, const string& outputPath) {
-    return "ffmpeg -i \"" + inputPath + "\" -c:v libx264 -crf 18 -c:a aac -b:a 128k \"" + outputPath + "\"";
-}
-
-// 执行外部命令
-bool executeCommand(const string& command) {
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    ZeroMemory(&pi, sizeof(pi));
-
-    string cmd = "cmd.exe /c " + command;
-
-    if (!CreateProcess(NULL, (wchar_t*)cmd.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        cout << "CreateProcess failed!" << endl;
-        return false;
+    // 通过命令行参数获取目录路径
+    if (argc > 1) {
+        directory = argv[1];
     }
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+    try {
+        // 遍历目录中的所有文件（不包含子目录）
+        for (const auto& entry : fs::directory_iterator(directory)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".avi") {
+                std::string input_path = entry.path().string();
+                std::string output_path = entry.path().stem().string() + ".mp4";
 
-    return true;
-}
+                // 构造FFmpeg命令（处理路径中的空格）
+                std::string command = "ffmpeg -i \"" + input_path + "\" "
+                    "-c:v libx264 -c:a aac -y \"" + output_path + "\"";
 
-// 监控文件夹中的 AVI 文件
-void monitorFolder(const string& folderPath) {
-    DWORD dwNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE;
+                // 执行转换命令
+                int result = std::system(command.c_str());
 
-    HANDLE hDirectory = CreateFile(
-        (WCHAR*)folderPath.c_str(),
-        FILE_LIST_DIRECTORY,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        NULL,
-        OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS,
-        NULL
-    );
-
-    if (hDirectory == INVALID_HANDLE_VALUE) {
-        cout << "CreateFile failed!" << endl;
-        return;
-    }
-
-    BYTE buffer[1024];
-    DWORD bytesReturned;
-    int i;
-
-    while (true) {
-        if (ReadDirectoryChangesW(
-            hDirectory,
-            &buffer,
-            BUF_SIZE,
-            TRUE,
-            dwNotifyFilter,
-            &bytesReturned
-        )) {
-            do {
-                PFILE_NOTIFY_INFORMATION pNotify = (PFILE_NOTIFY_INFORMATION)buffer;
-                do {
-                    if (pNotify->Action == FILE_ACTION_ADDED &&
-                        string(pNotify->FileName).substr(pNotify->FileNameLength - 4) == ".avi") {
-                        string inputFilePath = folderPath + "\\" + string(pNotify->FileName);
-                        string outputFilePath = folderPath + "\\" + string(pNotify->FileName).substr(0, pNotify->FileNameLength - 4) + ".mp4";
-
-                        string command = getFFmpegCommand(inputFilePath, outputFilePath);
-                        cout << "Converting: " << inputFilePath << " to " << outputFilePath << endl;
-
-                        if (executeCommand(command)) {
-                            cout << "Conversion completed successfully!" << endl;
-                        }
-                        else {
-                            cout << "Conversion failed!" << endl;
-                        }
-                    }
-
-                    pNotify = (PFILE_NOTIFY_INFORMATION)((BYTE*)pNotify + pNotify->NextEntryOffset);
-                } while (pNotify->NextEntryOffset != 0);
-            } while (bytesReturned > 0);
+                if (result == 0) {
+                    std::cout << "[成功] 转换完成: " << input_path << " -> " << output_path << std::endl;
+                }
+                else {
+                    std::cerr << "[错误] 转换失败: " << input_path << " (FFmpeg错误码: " << result << ")" << std::endl;
+                }
+            }
         }
     }
-}
+    catch (const fs::filesystem_error& e) {
+        std::cerr << "文件系统错误: " << e.what() << std::endl;
+        return 1;
+    }
 
-int main() {
-    string folderPath = "."; // 当前文件夹
-    cout << "Monitoring folder: " << folderPath << endl;
-
-    monitorFolder(folderPath);
     return 0;
 }
