@@ -3,6 +3,7 @@
 
 
 **使用之前确保你已安装[ffmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)**
+**FFmpeg路径应加入系统PATH环境变量**
 
 # 功能详解
 
