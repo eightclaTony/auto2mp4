@@ -38,7 +38,8 @@ public:
 
     void start() {
         std::cout << "监控目录: " << directory << "\n"
-            << "输出目录: " << (directory / output_dir) << std::endl;
+            << "输出目录: " << (directory / output_dir)
+            << "\n硬件加速: NVIDIA NVENC 已启用\n" << std::endl;
         while (true) {
             check_new_files();
             std::this_thread::sleep_for(std::chrono::seconds(check_interval));
@@ -117,9 +118,10 @@ private:
             output_path.replace_extension(".mp4");
             fs::create_directories(output_path.parent_path());
 
+            // NVIDIA硬件加速命令
             std::string command =
-                "ffmpeg -y -i \"" + input_path.string() + "\" "
-                "-c:v libx264 -preset fast -crf 23 "
+                "ffmpeg -hwaccel cuda -y -i \"" + input_path.string() + "\" "
+                "-c:v h264_nvenc -preset p6 -cq 23 "    // NVIDIA编码参数
                 "-c:a aac -b:a 128k \"" + output_path.string() + "\"";
 
             int result = std::system(command.c_str());
@@ -127,7 +129,7 @@ private:
 
             if (success) {
                 processed_files.insert(filename);
-                save_processed_file(filename); // 持久化存储
+                save_processed_file(filename);
             }
         }
         catch (...) {
@@ -137,7 +139,7 @@ private:
         auto end_time = std::chrono::system_clock::now();
         write_log(filename, success, start_time, end_time);
 
-        std::cout << (success ? "✓ 转换成功: " : "✗ 转换失败: ")
+        std::cout << (success ? "✓ 转换成功: " : R"(✗ 转换失败: )")
             << filename << std::endl;
     }
 };
