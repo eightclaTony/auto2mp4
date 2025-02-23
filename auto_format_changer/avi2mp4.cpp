@@ -131,21 +131,32 @@ private:
     }
 
     void convert_video(const fs::path& input_path) {
+        if (!fs::exists(input_path)) {
+            std::cerr << "文件不存在: " << input_path << std::endl;
+            return;
+        }
         auto start_time = std::chrono::system_clock::now();
         fs::path relative_path = input_path.lexically_relative(directory);
         std::string relative_path_str = relative_path.generic_string();
         bool success = false;
+
+        std::cout << "开始转换文件: " << input_path.filename() << std::endl;
 
         try {
             fs::path output_path = directory / output_dir / relative_path;
             output_path.replace_extension(".mp4");
             fs::create_directories(output_path.parent_path());
 
-            // NVIDIA硬件加速命令
+            // 智能流映射命令
             std::string command =
                 "ffmpeg -hwaccel cuda -y -i \"" + input_path.string() + "\" "
+                "-map 0:v? -map 0:a? -map 0:s? "  // 智能流选择（带错误忽略）
+                "-map -0:d -map -0:t "            // 排除数据流和附件流
                 "-c:v h264_nvenc -preset p6 -cq 23 -pix_fmt yuv420p "
-                "-c:a aac -b:a 128k \"" + output_path.string() + "\"";
+                "-c:a aac -b:a 128k "
+                "-c:s mov_text "                  // 仅在有字幕时生效
+                "-max_interleave_delta 0 "        // 提升兼容性
+                "\"" + output_path.string() + "\" 2> \"" + (directory / output_dir / "ffmpeg_log.txt").string() + "\"";
 
             int result = std::system(command.c_str());
             success = (result == 0);
@@ -153,6 +164,17 @@ private:
             if (success) {
                 processed_files.insert(relative_path_str);
                 save_processed_file(relative_path_str);
+            }
+            else {
+                std::ifstream log_file(directory / output_dir / "ffmpeg_log.txt");
+                if (log_file) {
+                    std::string line;
+                    while (std::getline(log_file, line)) {
+                        if (line.find("Subtitle codec") != std::string::npos) {
+                            std::cerr << "字幕编码器不支持: " << line << std::endl;
+                        }
+                    }
+                }
             }
         }
         catch (...) {
