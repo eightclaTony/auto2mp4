@@ -6,6 +6,11 @@
 
 **FFmpeg路径应加入系统PATH环境变量**
 
+# 应用截图
+
+[![image](https://github.com/user-attachments/assets/fdb74067-23ce-4c04-9733-3158f50a9d0f)](https://github.com/eightclaTony/auto2mp4/blob/master/image.png)
+
+
 # 功能详解
 
 -  实时监控指定文件夹（60秒轮询间隔）
@@ -15,19 +20,13 @@
 -  详细日志记录（转换状态/耗时/时间戳）
 -  断点续传功能（避免重复转换）
 
-## 文件结构示例
-```
-源文件夹/
-├── video1.avi
-├── subdir/
-│   └── video2.mkv
-└── 2mp4 output/
-    ├── conversion.log        # 转换日志
-    ├── processed_files.txt   # 已处理文件记录
-    ├── video1.mp4
-    └── subdir/
-        └── video2.mp4
-```
+不同情况的处理策略：
+| 文件类型         | 处理方式                     | 输出结果           |
+|------------------|------------------------------|--------------------|
+| 有视频+音频+字幕 | 全流转换                     | 完整MP4带字幕      |
+| 有视频+音频      | 仅转换音视频                 | 标准MP4无字幕      |
+| 有视频+字幕      | 转换视频+字幕（生成无声视频） | 带字幕的无声MP4    |
+| 纯视频           | 转换视频流                   | 无声MP4            |
 
 # 使用方法
 
@@ -51,7 +50,24 @@ n_2mp4 folder    监控指定目录
 
 大功告成！
 
-如果你想，你还可以将其设置为计划任务
+*tips:如果你想，你还可以将其设置为计划任务*
+
+## 文件结构示例
+```
+源文件夹/
+├── video1.avi
+├── subdir/
+│   └── video2.mkv
+└── 2mp4 output/
+    ├── conversion.log        # 转换日志
+    ├── processed_files.txt   # 已处理文件记录
+    ├── ffmpeg_log.txt        # 已处理文件记录
+    ├── video1.mp4
+    └── subdir/
+        └── video2.mp4
+```
+
+
 
 # 使用nvidia硬件加速！
 
