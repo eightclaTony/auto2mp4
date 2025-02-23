@@ -35,6 +35,11 @@
 2.在下载目录打开cmd或powershell
 
 3.执行命令
+如果您没有nvidia显卡,请使用2mp4.exe
+
+如果您拥有nvidia显卡且已正确安装依赖,请使用n_2mp4.exe
+
+有关nvidia显卡的依赖安装,请参阅[安装依赖](## 安装依赖)
 
 对于n_2mp4.exe
 ```
