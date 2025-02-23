@@ -8,7 +8,7 @@
 
 # 应用截图
 
-[![image](https://github.com/user-attachments/assets/fdb74067-23ce-4c04-9733-3158f50a9d0f)](https://github.com/eightclaTony/auto2mp4/blob/master/image.png)
+[![image](https://github.com/eightclaTony/auto2mp4/blob/master/image.png)]
 
 
 # 功能详解
