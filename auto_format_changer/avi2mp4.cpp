@@ -8,6 +8,10 @@
 #include <vector>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
+#include <regex>
+#include <cstdio>
+
 
 namespace fs = std::filesystem;
 
@@ -20,6 +24,7 @@ bool safe_localtime(const std::time_t* time, std::tm& tm_out) {
 #endif
 }
 
+
 class FolderWatcher {
 private:
     fs::path directory;
@@ -30,17 +35,58 @@ private:
     const fs::path log_file = output_dir / "conversion.log";
     const fs::path state_file = output_dir / "processed_files.txt";
 
-    // 辅助函数：判断路径是否在输出目录下
+    // 跨平台管道处理
+    FILE* open_pipe(const std::string& command) {
+#if defined(_WIN32)
+        return _popen(command.c_str(), "r");
+#else
+        return popen(command.c_str(), "r");
+#endif
+    }
+
+    void close_pipe(FILE* pipe) {
+#if defined(_WIN32)
+        _pclose(pipe);
+#else
+        pclose(pipe);
+#endif
+    }
+
     bool is_under_output_dir(const fs::path& path) const {
         fs::path output_dir_abs = directory / output_dir;
         auto rel_path = path.lexically_relative(output_dir_abs);
         return !rel_path.empty() && rel_path.native()[0] != '.';
     }
 
+    double get_video_duration(const fs::path& input_path) {
+        std::string command =
+            "ffprobe -v error -show_entries format=duration -of "
+            "default=noprint_wrappers=1:nokey=1 \"" +
+            input_path.string() + "\"";
+
+        FILE* pipe = open_pipe(command);
+        if (!pipe) return 0.0;
+
+        char buffer[128];
+        std::string result;
+        while (fgets(buffer, sizeof(buffer), pipe)) {
+            result += buffer;
+        }
+        close_pipe(pipe);
+
+        try {
+            return std::stod(result);
+        }
+        catch (...) {
+            std::cerr << "无法获取视频时长: " << input_path << std::endl;
+            return 0.0;
+        }
+    }
+
 public:
     FolderWatcher(const std::string& path) : directory(fs::absolute(path)) {
-        load_processed_files(); // 加载历史记录
-        fs::create_directories(directory / output_dir); // 确保输出目录存在
+        load_processed_files();
+        fs::create_directories(directory / output_dir);
     }
 
     void start() {
@@ -135,46 +181,84 @@ private:
             std::cerr << "文件不存在: " << input_path << std::endl;
             return;
         }
+
         auto start_time = std::chrono::system_clock::now();
         fs::path relative_path = input_path.lexically_relative(directory);
         std::string relative_path_str = relative_path.generic_string();
         bool success = false;
 
-        std::cout << "开始转换文件: " << input_path.filename() << std::endl;
+        std::cout << "\n开始转换文件: " << input_path.filename() << std::endl;
 
         try {
             fs::path output_path = directory / output_dir / relative_path;
             output_path.replace_extension(".mp4");
             fs::create_directories(output_path.parent_path());
 
-            // 智能流映射命令
+            // 获取视频总时长
+            double total_duration = get_video_duration(input_path);
+            if (total_duration <= 0.1) {
+                std::cerr << "无法获取有效视频时长，跳过进度显示" << std::endl;
+            }
+
+            // 构建FFmpeg命令（注意2>&1）
             std::string command =
                 "ffmpeg -hwaccel cuda -y -i \"" + input_path.string() + "\" "
-                "-map 0:v? -map 0:a? -map 0:s? "  // 智能流选择（带错误忽略）
-                "-map -0:d -map -0:t "            // 排除数据流和附件流
-                "-c:v h264_nvenc -preset p6 -cq 23 -pix_fmt yuv420p "
+                "-map 0:v? -map 0:a? -map 0:s? "
+                "-map -0:d -map -0:t "
+                "-c:v h264_nvenc -preset p6 -cq 23 -pix_fmt yuv420p "       // 不使用 libx264，使用 NVENC 硬件编码
                 "-c:a aac -b:a 128k "
-                "-c:s mov_text "                  // 仅在有字幕时生效
-                "-max_interleave_delta 0 "        // 提升兼容性
-                "\"" + output_path.string() + "\" 2> \"" + (directory / output_dir / "ffmpeg_log.txt").string() + "\"";
+                "-c:s mov_text "
+                "-max_interleave_delta 0 "
+                "\"" + output_path.string() + "\" 2>&1";
 
-            int result = std::system(command.c_str());
-            success = (result == 0);
+            // 打开管道和日志文件
+            FILE* pipe = open_pipe(command);
+            if (!pipe) return;
 
+            std::ofstream log_stream(directory / output_dir / "ffmpeg_log.txt", std::ios::app);
+            char buffer[256];
+            std::regex time_regex(R"(time=(\d+):(\d+):(\d+\.\d+))");
+            std::smatch match;
+
+            // 实时读取输出
+            while (fgets(buffer, sizeof(buffer), pipe)) {
+                std::string line(buffer);
+                log_stream << line;  // 写入日志文件
+
+                // 解析进度
+                if (total_duration > 0.1 && std::regex_search(line, match, time_regex)) {
+                    int hours = std::stoi(match[1]);
+                    int minutes = std::stoi(match[2]);
+                    double seconds = std::stod(match[3]);
+
+                    double current_time =
+                        hours * 3600 + minutes * 60 + seconds;
+                    double progress =
+                        (current_time / total_duration) * 100;
+
+                    // 显示进度条
+                    const int progress_bar_length = 40;
+                    int pos = static_cast<int>(progress * progress_bar_length / 100);
+                    std::string progress_bar(progress_bar_length, '.');
+                    progress_bar.replace(0, pos, pos, '#');
+
+                    std::cout << "\r[" << progress_bar << "] "
+                        << std::fixed << std::setprecision(1) << progress << "%"
+                        << std::flush;
+
+                    if (progress >= 100) {
+                        std::cout << std::endl;
+                    }
+                }
+            }
+
+            // 获取退出状态
+            int result = _pclose(pipe);
+
+            // 后续处理...
             if (success) {
                 processed_files.insert(relative_path_str);
                 save_processed_file(relative_path_str);
-            }
-            else {
-                std::ifstream log_file(directory / output_dir / "ffmpeg_log.txt");
-                if (log_file) {
-                    std::string line;
-                    while (std::getline(log_file, line)) {
-                        if (line.find("Subtitle codec") != std::string::npos) {
-                            std::cerr << "字幕编码器不支持: " << line << std::endl;
-                        }
-                    }
-                }
             }
         }
         catch (...) {
@@ -184,7 +268,7 @@ private:
         auto end_time = std::chrono::system_clock::now();
         write_log(relative_path_str, success, start_time, end_time);
 
-        std::cout << (success ? "[+]转换成功: " : "[-] 转换失败: ")
+        std::cout << (success ? "[+]转换成功: " : "[-]转换失败: ")
             << relative_path_str << std::endl;
     }
 };
